@@ -1,0 +1,39 @@
+name: Audit public data access
+on:
+  push:
+    paths: ['.github/workflows/audit.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe public sources
+        shell: python
+        run: |
+          import json, urllib.request, urllib.parse, re
+          base="https://services1.arcgis.com/EYzEZbDhXZjURPbP/arcgis/rest/services/"
+          def fetch(url, params=None):
+              if params: url+="?"+urllib.parse.urlencode(params)
+              with urllib.request.urlopen(url,timeout=20) as r: return r.read().decode()
+          for name in ["City_Limits","Buildings","City_of_Bellevue_Parcels","Bellevue_Permits"]:
+              try:
+                  root=base+name+"/FeatureServer"
+                  meta=json.loads(fetch(root,{"f":"json"}))
+                  print(name,"layers",meta.get("layers"),"error",meta.get("error"),flush=True)
+                  layer=root+"/"+str(meta["layers"][0]["id"])
+                  meta=json.loads(fetch(layer,{"f":"json"}))
+                  print("FIELDS",name,[f["name"] for f in meta.get("fields",[])],flush=True)
+                  print("COUNT",name,fetch(layer+"/query",{"f":"json","where":"1=1","returnCountOnly":"true"}),flush=True)
+                  sample=json.loads(fetch(layer+"/query",{"f":"geojson","where":"1=1","outFields":"*","resultRecordCount":1,"outSR":4326}))
+                  # Do not print parcel/permit records or personal contact data.
+                  print("SAMPLE",name,"features",len(sample.get("features",[])),"error",sample.get("error"),flush=True)
+                  if name=="City_Limits": print("BOUNDARY",sample.get("features",[{}])[0].get("properties"),flush=True)
+              except Exception as e: print("ERROR",name,str(e),flush=True)
+          try:
+              html=fetch("https://info.kingcounty.gov/assessor/DataDownload/default.aspx")
+              print("ASSESSOR_ZIP_LINKS",re.findall(r'href=["'+"'"+r']([^"'+"'"+r']*\.zip[^"'+"'"+r']*)',html,re.I),flush=True)
+              print("ASSESSOR_FORM_INPUTS",re.findall(r'<input[^>]+type=["'+"'"+r'](?:checkbox|submit)["'+"'"+r'][^>]*>',html,re.I),flush=True)
+          except Exception as e: print("ERROR assessor",str(e),flush=True)
