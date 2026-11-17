@@ -27,7 +27,7 @@ SESSION.mount("https://", HTTPAdapter(max_retries=Retry(total=3, backoff_factor=
 REPORT = {"retrieved_at":datetime.now(timezone.utc).isoformat(),"sources":{},"warnings":[]}
 
 def get_json(url, params=None):
-    r=SESSION.get(url,params=params,timeout=120)
+    r=SESSION.post(url,data=params,timeout=120) if params and "objectIds" in params else SESSION.get(url,params=params,timeout=120)
     r.raise_for_status()
     data=r.json()
     if "error" in data:
@@ -167,6 +167,9 @@ def output_json(name,data):
 def build():
     OUT.mkdir(exist_ok=True)
     boundary=fetch_features("City_Limits")
+    named=[f for f in boundary if any(str(v).strip().upper() in {"BELLEVUE","CITY OF BELLEVUE"} for v in f["properties"].values())]
+    if named: boundary=named
+    elif len(boundary)>1: raise RuntimeError("Boundary service contains multiple features without an exact Bellevue name; manual source selection required")
     city=unary_union([safe_shape(f) for f in boundary if f.get("geometry")])
     if city.is_empty: raise RuntimeError("City boundary is empty")
     buildings=fetch_features("Buildings")
