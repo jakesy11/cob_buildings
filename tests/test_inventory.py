@@ -11,6 +11,9 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(m.parcel_id({"Major":"1234","Minor":"12"}),"0012340012")
         self.assertEqual(m.pin("001234-0012"),"0012340012")
         self.assertEqual(m.pin("multiple parcels"),"")
+    def test_city_internal_id_is_not_county_parcel_number(self):
+        self.assertEqual(m.parcel_id({"LISParcelI":4296,"ParcelAFN":"8964800760"}),"8964800760")
+        self.assertEqual(m.parcel_id({"LISParcelI":4296}),"")
     def test_missing_numeric_data_is_not_zero(self):
         for value in ["",None,"unknown","0"]:
             self.assertIsNone(m.num(value))

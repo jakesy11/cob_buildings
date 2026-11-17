@@ -47,7 +47,7 @@ def norm(row):
 
 def parcel_id(row):
     row=norm(row)
-    for key in ("PIN","PARCELNUMBER","PARCELID","PARCELNO","LISPARCELI"):
+    for key in ("PIN","PARCELNUMBER","PARCELID","PARCELNO","PARCELAFN"):
         if row.get(key): return pin(row[key])
     if row.get("MAJOR") is not None and row.get("MINOR") is not None:
         return pin(str(row["MAJOR"]).strip().zfill(6)+str(row["MINOR"]).strip().zfill(4))
