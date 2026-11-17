@@ -31,6 +31,8 @@ jobs:
                   # Do not print parcel/permit records or personal contact data.
                   print("SAMPLE",name,"features",len(sample.get("features",[])),"error",sample.get("error"),flush=True)
                   if name=="City_Limits": print("BOUNDARY",sample.get("features",[{}])[0].get("properties"),flush=True)
+                  if name=="City_of_Bellevue_Parcels": print("PARCEL_IDENTIFIERS",[{k:v for k,v in f.get("properties",{}).items() if k in {"LISParcelI","ParcelAFN","ParcelAddr","Jurisdicti"}} for f in sample.get("features",[])],flush=True)
+                  if name=="Bellevue_Permits": print("PERMIT_PARCEL_IDENTIFIERS",[{k:v for k,v in f.get("properties",{}).items() if k in {"PARCELNUMBER","SITEADDRESS"}} for f in sample.get("features",[])],flush=True)
               except Exception as e: print("ERROR",name,str(e),flush=True)
           try:
               html=fetch("https://info.kingcounty.gov/assessor/DataDownload/default.aspx")
