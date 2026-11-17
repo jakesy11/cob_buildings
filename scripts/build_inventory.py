@@ -122,10 +122,11 @@ def csv_bytes(content):
     except csv.Error: dialect=csv.excel
     return list(csv.DictReader(io.StringIO(text),dialect=dialect))
 
-def read_table(content):
+def read_table(content,member_hint=None):
     if content[:2]==b"PK":
         with zipfile.ZipFile(io.BytesIO(content)) as archive:
             candidates=[n for n in archive.namelist() if n.lower().endswith((".csv",".txt"))]
+            if member_hint: candidates=[n for n in candidates if Path(n).name.lower()==member_hint.lower()]
             if len(candidates)!=1: raise RuntimeError("Expected one CSV/TXT in source archive; found "+str(candidates))
             return csv_bytes(archive.read(candidates[0]))
     return csv_bytes(content)
@@ -149,18 +150,24 @@ def assessor_links():
     if not links: print("Assessor public download-page links:",json.dumps([(a.get_text(" ",strip=True),a["href"]) for a in soup.select("a[href]") if re.search("download|extract|commercial|apartment",a.get_text(" ",strip=True)+" "+a["href"],re.I)]),flush=True)
     return links
 
+ASSESSOR_CONTENT={}
+
 def assessor_table(kind,links):
     local=ROOT/"inputs"/(kind+".csv")
     if local.exists():
         rows=read_table(local.read_bytes())
         REPORT["sources"][kind]={"status":"provided","records":len(rows),"url":str(local.relative_to(ROOT))}
         return rows
-    patterns={"commercial":r"commercial.*build|commbldg","apartments":r"apartment|aptcomplex","sections":r"commercial.*section|commbldgsection"}
+    patterns={"commercial":r"commercial.*build|commbldg","apartments":r"apartment|aptcomplex","sections":r"commercial.*build|commbldg"}
     matches=[url for label,url in links if re.search(patterns[kind],label+" "+url,re.I)]
-    if kind=="commercial": matches=[u for u in matches if not re.search("section|feature",u,re.I)]
+    if kind in {"commercial","sections"}: matches=[u for u in matches if not re.search("section|feature",u,re.I)]
     if len(matches)!=1: raise RuntimeError(f"Cannot uniquely discover {kind} public download ({len(matches)} matches); place official CSV at inputs/{kind}.csv for local use.")
-    r=SESSION.get(matches[0],timeout=180);r.raise_for_status()
-    rows=read_table(r.content)
+    if matches[0] not in ASSESSOR_CONTENT:
+        r=SESSION.get(matches[0],timeout=180);r.raise_for_status()
+        ASSESSOR_CONTENT[matches[0]]=r.content
+    hints={"commercial":"EXTR_CommBldg.csv","sections":"EXTR_CommBldgSection.csv"}
+    rows=read_table(ASSESSOR_CONTENT[matches[0]],hints.get(kind))
+    print(kind,"columns",list(rows[0]) if rows else [],flush=True)
     if not rows or not parcel_id(rows[0]): raise RuntimeError("Unexpected assessor schema")
     REPORT["sources"][kind]={"status":"retrieved","url":matches[0],"records":len(rows)}
     print(kind,len(rows),flush=True)

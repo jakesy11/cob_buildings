@@ -36,6 +36,12 @@ jobs:
           node --check /tmp/explorer.js
       - name: Retrieve sources and build map
         run: python scripts/build_inventory.py
+      - name: Install browser checks
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+      - name: Check generated interactive map
+        run: python scripts/check_map.py
       - name: Publish source summary
         if: always()
         run: |

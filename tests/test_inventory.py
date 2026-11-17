@@ -1,5 +1,7 @@
 import importlib.util
 import unittest
+import io
+import zipfile
 from pathlib import Path
 spec=importlib.util.spec_from_file_location("inventory",Path(__file__).resolve().parents[1]/"scripts/build_inventory.py")
 m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -17,6 +19,14 @@ class IntegrityTests(unittest.TestCase):
         self.assertEqual(m.classify(None),"Unclassified")
         self.assertEqual(m.classify("300"),"Multifamily")
         self.assertEqual(m.classify("345"),"Parking")
+    def test_multiple_tables_in_official_archive(self):
+        stream=io.BytesIO()
+        with zipfile.ZipFile(stream,"w") as archive:
+            archive.writestr("EXTR_CommBldg.csv","Major,Minor,BldgNbr\n001234,0012,1\n")
+            archive.writestr("EXTR_CommBldgSection.csv","Major,Minor,SectionUse\n001234,0012,300\n")
+        rows=m.read_table(stream.getvalue(),"EXTR_CommBldg.csv")
+        self.assertEqual(rows[0]["BldgNbr"],"1")
+        with self.assertRaises(RuntimeError): m.read_table(stream.getvalue())
     def test_csv_keeps_identifiers(self):
         rows=m.csv_bytes(b"\xef\xbb\xbfMajor,Minor,BLDGNBR\n001234,0012,1\n")
         self.assertEqual(m.parcel_id(rows[0]),"0012340012")
