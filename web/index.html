@@ -15,7 +15,7 @@
 <div class="notice" id="notice" role="status">This template needs a data build. Run the repository's “Build building inventory” workflow and download the explorer artifact.</div>
 <div class="metrics"><div class="metric"><strong id="count">—</strong><span>Filtered building footprints</span></div><div class="metric"><strong id="recordCount">—</strong><span>Linked Assessor records</span></div></div>
 <label for="search">Find an address, parcel or building ID</label><input id="search" type="search" placeholder="e.g. parcel number or street">
-<label for="category">Building use</label><select id="category"><option value="">All footprints, including unclassified</option><option>Multifamily</option><option>Commercial / institutional</option><option>Mixed-use</option><option>Parking</option><option>Residential—review</option><option>Unclassified</option></select>
+<label for="category">Building use</label><select id="category"><option value="target">Commercial, multifamily & mixed-use</option><option value="">All footprints, including unclassified</option><option>Multifamily</option><option>Commercial / institutional</option><option>Mixed-use</option><option>Parking</option><option>Residential—review</option><option>Unclassified</option></select>
 <label for="era">Construction era (linked Assessor records)</label><select id="era"><option value="">All / unknown</option><option value="pre1980">Before 1980</option><option value="1980">1980–1999</option><option value="2000">2000–2019</option><option value="2020">2020 onward</option><option value="unknown">Unknown</option></select>
 <label><input id="energy" type="checkbox">Parcel has an energy-related permit keyword</label>
 <div class="muted">Permit keywords flag records for review. They do not establish a completed retrofit.</div>
@@ -58,7 +58,9 @@ for(const p of data?.permits||[]){if(!permitsByPin.has(p.parcel_id))permitsByPin
 function rowsFor(f){return (f.properties.inventory_ids||[]).map(id=>records.get(id)).filter(Boolean);}
 function match(f){
  const p=f.properties,rs=rowsFor(f),q=$("search").value.trim().toLowerCase();
- if($("category").value&&p.category!==$("category").value)return false;
+ const category=$("category").value;
+ if(category==="target"&&!["Multifamily","Commercial / institutional","Mixed-use"].includes(p.category))return false;
+ if(category&&category!=="target"&&p.category!==category)return false;
  if(q&&!([p.parcel_id,p.footprint_id,...rs.flatMap(r=>[r.address,r.inventory_id])].join(" ").toLowerCase().includes(q)))return false;
  const era=$("era").value;
  if(era){const years=rs.map(r=>r.year_built).filter(x=>x!=null);
@@ -114,6 +116,7 @@ $("permits").onchange=drawPermits;
 let debounce;$("search").oninput=()=>{clearTimeout(debounce);debounce=setTimeout(render,180);};
 $("reset").onclick=()=>{$("search").value="";$("category").value="";$("era").value="";$("energy").checked=false;$("permits").checked=false;render();if(map&&data)map.fitBounds(L.geoJSON(data.boundary).getBounds());};
 if(data){
+ $("category").value=data.inventory.length?"target":"";
  $("date").textContent="Retrieved "+new Date(data.report.retrieved_at).toLocaleDateString();
  const s=data.report.summary;
  $("notice").textContent=s.assessor_records_in_city_parcels?"Research baseline. Footprint classifications inherit parcel-associated uses; exact building matches need review. Commerce results are included only where supplied.":"Assessor records have not been linked. These are city building footprints, including homes—not a complete commercial/multifamily inventory.";

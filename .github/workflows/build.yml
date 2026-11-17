@@ -2,7 +2,11 @@ name: Build building inventory
 on:
   push:
     branches: [main]
+    paths: ["scripts/**", "web/**", "tests/**", "requirements.txt", ".github/workflows/build.yml"]
   workflow_dispatch:
+concurrency:
+  group: building-inventory
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:

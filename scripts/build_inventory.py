@@ -47,7 +47,7 @@ def norm(row):
 
 def parcel_id(row):
     row=norm(row)
-    for key in ("PIN","PARCELNUMBER","PARCELID","PARCELNO"):
+    for key in ("PIN","PARCELNUMBER","PARCELID","PARCELNO","LISPARCELI"):
         if row.get(key): return pin(row[key])
     if row.get("MAJOR") is not None and row.get("MINOR") is not None:
         return pin(str(row["MAJOR"]).strip().zfill(6)+str(row["MINOR"]).strip().zfill(4))
@@ -87,13 +87,22 @@ def fetch_features(name,url=None):
     if name=="Bellevue_Permits":
         allowed={"ObjectId","PERMITNUMBER","PERMITTYPE","PERMITTYPEDESCRIPTION","SITEADDRESS","CITY","PERMITSTATUS","PARCELNUMBER","PROJECTNAME","PROJECTDESCRIPTION","APPLIEDDATE","ISSUEDDATE","FINALEDDATE","PERMITYEAR","DWELLINGUNITSCREATED","OCCUPANCYGROUP1","SQFOOTAGE1"}
         fields=[x for x in fields if x in allowed]
+    oid=ids and (meta.get("objectIdField") or next(f["name"] for f in meta["fields"] if f["type"]=="esriFieldTypeOID"))
     def batch(chunk):
-        part=get_json(url+"/query",{"f":"geojson","objectIds":",".join(map(str,chunk)),"outFields":",".join(fields) if name=="Bellevue_Permits" else "*","outSR":"4326","returnGeometry":"true"})
+        params={k:v for k,v in query.items() if k not in {"returnIdsOnly","where"}}
+        params.update({"f":"geojson","where":f"{oid} >= {chunk[0]} AND {oid} <= {chunk[-1]}","outFields":",".join(fields) if name=="Bellevue_Permits" else "*","outSR":"4326","returnGeometry":"true","resultRecordCount":1000})
+        part=get_json(url+"/query",params)
         if part.get("exceededTransferLimit"): raise RuntimeError("Truncated query: "+name)
-        return part.get("features",[])
+        result=part.get("features",[])
+        actual={int(f.get("id",f["properties"].get(oid))) for f in result}
+        if actual!=set(chunk): raise RuntimeError("Batch ID mismatch: "+name)
+        return result
     print(name,"querying",len(ids),"records",flush=True)
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        for part in pool.map(batch,[ids[i:i+50] for i in range(0,len(ids),50)]): features.extend(part)
+    chunks=[ids[i:i+500] for i in range(0,len(ids),500)]
+    if chunks:
+        features.extend(batch(chunks[0]))
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for part in pool.map(batch,chunks[1:]): features.extend(part)
     if len(features)!=len(ids): raise RuntimeError(f"{name}: expected {len(ids)} records, received {len(features)}")
     REPORT["sources"][name]={"url":url,"records":len(features),"status":"retrieved","fields":fields,"source_edit_date":meta.get("editingInfo",{}).get("lastEditDate")}
     print(name,len(features),flush=True)

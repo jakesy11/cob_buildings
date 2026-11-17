@@ -37,3 +37,29 @@ jobs:
               print("ASSESSOR_ZIP_LINKS",re.findall(r'href=["'+"'"+r']([^"'+"'"+r']*\.zip[^"'+"'"+r']*)',html,re.I),flush=True)
               print("ASSESSOR_FORM_INPUTS",re.findall(r'<input[^>]+type=["'+"'"+r'](?:checkbox|submit)["'+"'"+r'][^>]*>',html,re.I),flush=True)
           except Exception as e: print("ERROR assessor",str(e),flush=True)
+
+      - name: Inspect acknowledged Assessor downloads
+        shell: python
+        run: |
+          from html.parser import HTMLParser
+          import urllib.request, urllib.parse, http.cookiejar, re
+          class Form(HTMLParser):
+              def __init__(self): super().__init__(); self.values={}; self.checkbox=None; self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=="input" and a.get("name"):
+                      if a.get("type")=="hidden": self.values[a["name"]]=a.get("value","")
+                      if a.get("type")=="checkbox": self.checkbox=a["name"]
+                  if tag=="a" and a.get("href"): self.links.append(a["href"])
+          opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+          url="https://info.kingcounty.gov/assessor/DataDownload/default.aspx"
+          try:
+              html=opener.open(url,timeout=20).read().decode()
+              form=Form(); form.feed(html)
+              if form.checkbox:
+                  form.values.update({form.checkbox:"on","__EVENTTARGET":form.checkbox,"__EVENTARGUMENT":""})
+                  html=opener.open(url,data=urllib.parse.urlencode(form.values).encode(),timeout=20).read().decode()
+              parsed=Form(); parsed.feed(html)
+              print("ACKNOWLEDGED_DOWNLOAD_LINKS",[x for x in parsed.links if re.search("zip|download|extract|commercial|apartment",x,re.I)],flush=True)
+              print("DOWNLOAD_TEXT",re.sub("<[^>]+>"," ",html)[-16000:],flush=True)
+          except Exception as e: print("ACKNOWLEDGEMENT_ERROR",str(e),flush=True)
