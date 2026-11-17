@@ -10,7 +10,7 @@ The artifact includes:
 - Interactive map with building-use, construction-era, address/parcel, and permit-keyword filters.
 - Building footprint GeoJSON.
 - Assessor inventory JSON and CSV when Assessor records can be retrieved and matched.
-- Parcel-associated permit records with project descriptions and status.
+- Parcel-associated permit records for inventoried Assessor properties, with project descriptions and status.
 - A source report with retrieval dates, source availability, counts, schema and warnings.
 
 A successful workflow can still produce a **partial inventory**. Read source_report.json and the map's Sources & methods panel. Unavailable Assessor data leaves footprints explicitly unclassified. No synthetic buildings, energy measurements, fuel assumptions or compliance results are used.
@@ -26,7 +26,7 @@ A successful workflow can still produce a **partial inventory**. Read source_rep
 
 The builder discovers the public Assessor download links after the site's public-use acknowledgement and attempts commercial-building, apartment-complex and building-section downloads. It never authenticates to restricted GIS or Commerce accounts. Failure is recorded rather than replaced with fabricated attributes.
 
-For a local build, official Assessor CSV files can be placed at inputs/commercial.csv, inputs/apartments.csv and inputs/sections.csv. These local inputs are gitignored. Only the named official datasets are supported; schema checks stop unexpected data.
+For a local build, official Assessor CSV files can be placed at inputs/commercial.csv, inputs/apartments.csv and inputs/sections.csv. These local inputs are gitignored. Only the named official datasets are supported; schema checks stop unexpected data. The public commercial ZIP includes building, section and feature CSVs; the importer selects the building and section members separately. Raw download headers differ from the GIS catalog: Address maps to the inventory address, NbrUnits supplies apartment-complex units, and Bellevue ParcelAFN is the county PIN (LISParcelI is an internal ID).
 
 ## Commerce data
 

@@ -21,6 +21,13 @@ with sync_playwright() as p:
     page.wait_for_function('document.querySelector("#count").textContent === "0"')
     page.click("#reset")
     page.wait_for_function('document.querySelector("#count").textContent !== "0"')
+    address=page.evaluate('filtered.flatMap(rowsFor).map(r=>r.address).find(Boolean) || null')
+    assert address,"No mapped Assessor addresses available for search"
+    before=page.locator("#count").inner_text()
+    page.fill("#search",address)
+    page.wait_for_function('(before)=>document.querySelector("#count").textContent!==before && document.querySelector("#count").textContent!=="0"',arg=before)
+    assert int(page.locator("#count").inner_text().replace(",",""))>0,"Known address search returned no footprints"
+    page.click("#reset")
     page.click("#sourcesButton")
     assert page.locator("#sources").is_visible()
     page.click("#closeSources")
