@@ -6,6 +6,7 @@ import os
 import re
 import zipfile
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urljoin
@@ -24,10 +25,11 @@ OUT = ROOT / "output"
 SESSION = requests.Session()
 SESSION.headers["User-Agent"] = "BellevueBuildingStockResearch/1.0 (public municipal planning)"
 SESSION.mount("https://", HTTPAdapter(max_retries=Retry(total=3, backoff_factor=1, status_forcelist=[429,500,502,503,504])))
+QUERY_BOUNDS = None
 REPORT = {"retrieved_at":datetime.now(timezone.utc).isoformat(),"sources":{},"warnings":[]}
 
 def get_json(url, params=None):
-    r=SESSION.post(url,data=params,timeout=120) if params and "objectIds" in params else SESSION.get(url,params=params,timeout=120)
+    r=SESSION.get(url,params=params,timeout=45)
     r.raise_for_status()
     data=r.json()
     if "error" in data:
@@ -74,7 +76,10 @@ def service_layer(name):
 def fetch_features(name,url=None):
     url=url or service_layer(name)
     meta=get_json(url,{"f":"json"})
-    ids=get_json(url+"/query",{"f":"json","where":"1=1","returnIdsOnly":"true"})
+    query={"f":"json","where":"1=1","returnIdsOnly":"true"}
+    if QUERY_BOUNDS and name!="City_Limits":
+        query.update({"geometry":",".join(map(str,QUERY_BOUNDS)),"geometryType":"esriGeometryEnvelope","inSR":"4326","spatialRel":"esriSpatialRelIntersects"})
+    ids=get_json(url+"/query",query)
     ids=sorted(ids.get("objectIds") or [])
     features=[]
     fields=[x["name"] for x in meta.get("fields",[])]
@@ -82,10 +87,13 @@ def fetch_features(name,url=None):
     if name=="Bellevue_Permits":
         allowed={"ObjectId","PERMITNUMBER","PERMITTYPE","PERMITTYPEDESCRIPTION","SITEADDRESS","CITY","PERMITSTATUS","PARCELNUMBER","PROJECTNAME","PROJECTDESCRIPTION","APPLIEDDATE","ISSUEDDATE","FINALEDDATE","PERMITYEAR","DWELLINGUNITSCREATED","OCCUPANCYGROUP1","SQFOOTAGE1"}
         fields=[x for x in fields if x in allowed]
-    for i in range(0,len(ids),250):
-        part=get_json(url+"/query",{"f":"geojson","objectIds":",".join(map(str,ids[i:i+250])),"outFields":",".join(fields),"outSR":"4326","returnGeometry":"true"})
+    def batch(chunk):
+        part=get_json(url+"/query",{"f":"geojson","objectIds":",".join(map(str,chunk)),"outFields":",".join(fields) if name=="Bellevue_Permits" else "*","outSR":"4326","returnGeometry":"true"})
         if part.get("exceededTransferLimit"): raise RuntimeError("Truncated query: "+name)
-        features.extend(part.get("features",[]))
+        return part.get("features",[])
+    print(name,"querying",len(ids),"records",flush=True)
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for part in pool.map(batch,[ids[i:i+50] for i in range(0,len(ids),50)]): features.extend(part)
     if len(features)!=len(ids): raise RuntimeError(f"{name}: expected {len(ids)} records, received {len(features)}")
     REPORT["sources"][name]={"url":url,"records":len(features),"status":"retrieved","fields":fields,"source_edit_date":meta.get("editingInfo",{}).get("lastEditDate")}
     print(name,len(features),flush=True)
@@ -127,7 +135,10 @@ def assessor_links():
             payload["__EVENTARGUMENT"]=""
             r=SESSION.post(urljoin(r.url,form.get("action") or r.url),data=payload,timeout=90)
             r.raise_for_status();soup=BeautifulSoup(r.text,"html.parser")
-    return [(a.get_text(" ",strip=True),urljoin(r.url,a["href"])) for a in soup.select("a[href]") if ".zip" in a["href"].lower()]
+    links=[(a.get_text(" ",strip=True),urljoin(r.url,a["href"])) for a in soup.select("a[href]") if ".zip" in a["href"].lower()]
+    print("Assessor public ZIP links:",json.dumps(links),flush=True)
+    if not links: print("Assessor public download-page links:",json.dumps([(a.get_text(" ",strip=True),a["href"]) for a in soup.select("a[href]") if re.search("download|extract|commercial|apartment",a.get_text(" ",strip=True)+" "+a["href"],re.I)]),flush=True)
+    return links
 
 def assessor_table(kind,links):
     local=ROOT/"inputs"/(kind+".csv")
@@ -165,6 +176,7 @@ def output_json(name,data):
     (OUT/name).write_text(json.dumps(data,separators=(",",":"),allow_nan=False),encoding="utf-8")
 
 def build():
+    global QUERY_BOUNDS
     OUT.mkdir(exist_ok=True)
     boundary=fetch_features("City_Limits")
     named=[f for f in boundary if any(str(v).strip().upper() in {"BELLEVUE","CITY OF BELLEVUE"} for v in f["properties"].values())]
@@ -172,6 +184,7 @@ def build():
     elif len(boundary)>1: raise RuntimeError("Boundary service contains multiple features without an exact Bellevue name; manual source selection required")
     city=unary_union([safe_shape(f) for f in boundary if f.get("geometry")])
     if city.is_empty: raise RuntimeError("City boundary is empty")
+    QUERY_BOUNDS=city.bounds
     buildings=fetch_features("Buildings")
     buildings=[f for f in buildings if f.get("geometry") and safe_shape(f).intersects(city)]
     parcels=optional("City_of_Bellevue_Parcels",lambda:fetch_features("City_of_Bellevue_Parcels"))
@@ -270,6 +283,16 @@ def build():
     # JSON must not be able to close the HTML script element.
     embedded=json.dumps(data,separators=(",",":"),allow_nan=False).replace("<","\\u003c")
     (OUT/"index.html").write_text(template.replace("/*__DATA__*/null",embedded),encoding="utf-8")
+    areas=defaultdict(float)
+    for record in records:
+        if record["gross_sqft"] is not None: areas[record["category"]]+=record["gross_sqft"]
+    REPORT["summary"]["assessor_gross_sqft_by_category"]=dict(areas)
+    output_json("source_report.json",REPORT)
+    lines=["# Bellevue building stock: preliminary source findings","", "Retrieved: "+REPORT["retrieved_at"],"", "## Inventory coverage","", "| Assessor category | Records | Reported gross floor area (sq ft) |","|---|---:|---:|"]
+    for category,count in sorted(REPORT["summary"]["categories"].items()): lines.append(f"| {category} | {count:,} | {areas[category]:,.0f} |")
+    lines+=["","Counts describe Assessor records, including aggregated records. Gross area includes source-defined areas and is not a state covered-floor-area determination. Unit totals are not summed across complex records.","","## Outstanding data gaps",""]+["- "+w for w in REPORT["warnings"]]
+    lines+=["","Commerce building-level reporting has not been obtained unless documented in source_report.json. Missing reports are not interpreted as noncompliance. No energy or emissions totals are estimated.","","## Source availability",""]+["- "+name+": "+source["status"] for name,source in REPORT["sources"].items()]
+    (OUT/"analysis.md").write_text("\n".join(lines)+"\n",encoding="utf-8")
     print(json.dumps(REPORT["summary"],indent=2),flush=True)
     if not footprints: raise RuntimeError("No footprints retrieved")
     return REPORT
