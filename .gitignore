@@ -1,0 +1,6 @@
+__pycache__/
+.cache/
+output/
+inputs/*.csv
+inputs/*.zip
+!inputs/commerce_template.csv

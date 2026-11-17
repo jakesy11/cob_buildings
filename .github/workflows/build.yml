@@ -1,0 +1,59 @@
+name: Build building inventory
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -r requirements.txt
+      - name: Test record integrity
+        run: python -m unittest discover -s tests -v
+      - name: Validate browser JavaScript syntax
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          text=Path("web/index.html").read_text()
+          scripts=re.findall(r'<script>([\s\S]*?)</script>',text)
+          Path("/tmp/explorer.js").write_text("\n".join(scripts))
+          PY
+          node --check /tmp/explorer.js
+      - name: Retrieve sources and build map
+        run: python scripts/build_inventory.py
+      - name: Publish source summary
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path("output/source_report.json")
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as out:
+              out.write("# Bellevue building inventory\n\n")
+              if p.exists():
+                  d=json.loads(p.read_text())
+                  out.write("Retrieved: "+d["retrieved_at"]+"\n\n")
+                  for k,v in d.get("summary",{}).items(): out.write("- "+k+": "+str(v)+"\n")
+                  out.write("\n## Source limitations\n\n")
+                  for w in d.get("warnings",[]): out.write("- "+w+"\n")
+                  if d.get("fatal_error"): out.write("\nBuild failed: "+d["fatal_error"])
+              else: out.write("Build stopped before a source report was created.")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bellevue-building-explorer
+          path: output/
+          if-no-files-found: warn
+          retention-days: 30
